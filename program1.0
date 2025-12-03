@@ -1,0 +1,331 @@
+#include <iostream>
+#include <string>
+#include <vector>
+#include <windows.h>
+#include <unordered_map>
+
+using namespace std;
+vector<string> usernames;
+vector<string> passwords;
+vector<string> roles;
+vector<double> cash = { 0 };
+enum Status { PENDING, SUCCESS, FAILED, REFUNDED };
+string currLogin;
+
+int identifikator;
+struct Payment
+{
+    string id;
+    double cashAmount;
+    Status status;
+};
+
+struct Order
+{
+    string id;
+    vector<string> medicaments;
+    double totalCost;
+    Status status;
+};
+
+struct medicament
+{
+    string name;
+    double cost;
+};
+vector<medicament> costOfMedicament;
+static unordered_map <string, Payment> db;
+static unordered_map <string, Order> ordersDb;
+static int orderCounter = 1;
+
+Payment processPayment(const string& userId,
+    double cashAmount,
+    double& amountOfUserCash)
+{
+    Payment payment;
+    payment.id = userId;
+    payment.cashAmount = cashAmount;
+    payment.status = PENDING;
+
+    db[payment.id] = payment;
+
+    if (cashAmount > amountOfUserCash)
+    {
+        db[payment.id].status = FAILED;
+        cout << "Оплата не вдалася. Недостатньо коштів." << endl;
+        return db[payment.id];
+    }
+
+    amountOfUserCash -= cashAmount;
+    payment.status = SUCCESS;
+    db[payment.id] = payment;
+    cout << "Оплата пройшла успішно." << endl;
+    return payment;
+}
+bool refundPayment(const string paymentId, double cashAmount)
+{
+    auto payment = db.find(paymentId);
+    if (payment == db.end())
+    {
+        cout << "Повернення не вдалося: платіж не знайдено" << endl;
+        return false;
+    }
+    // credit user balance
+    cash[identifikator] += cashAmount;
+    // update payment status in DB
+    payment->second.status = REFUNDED;
+    cout << "Повернення коштів успішне." << endl;
+    return true;
+}
+void signUp() {
+    string login, pass, role;
+
+    cout << "Введіть логін: ";
+    cin >> login;
+
+    for (int i = 0; i < (int)usernames.size(); i++) {
+        if (usernames[i] == login) {
+            cout << "Користувач з таким логіном вже існує" << endl;
+            return;
+        }
+    }
+
+    cout << "Введіть пароль: ";
+    cin >> pass;
+
+    cout << "Роль (user / farm / admin): ";
+    cin >> role;
+
+    usernames.push_back(login);
+    passwords.push_back(pass);
+    roles.push_back(role);
+    // ensure parallel cash vector grows with users
+    cash.push_back(0.0);
+
+    cout << "Реєстрація успішна" << endl;
+
+}
+
+void signIn() {
+    string login, pass;
+
+    cout << "Логін: ";
+    cin >> login;
+    cout << "Пароль: ";
+    cin >> pass;
+
+    for (int i = 0; i < (int)usernames.size(); i++) {
+        if (usernames[i] == login && passwords[i] == pass) {
+            cout << "Вхід успішний" << endl;
+            identifikator = i;
+            currLogin = login;
+            return;
+        }
+    }
+
+    cout << "Невірний логін або пароль" << endl;
+}
+
+bool searchMedicine(string name)
+{
+    for (const auto& m : costOfMedicament)
+    {
+        if (m.name == name)
+        {
+            cout << "Знайдено: " << m.name << " - " << m.cost << " грн" << endl;
+            return true;
+        }
+    }
+    cout << "Лікарський засіб не знайдено." << endl;
+    return false;
+}
+double checkBalanse(string user)
+{
+    for (int i = 0; i < (int)usernames.size(); i++)
+    {
+        if (usernames[i] == user)
+        {
+            cout << "Ваш баланс:" << endl;
+            return cash[i];
+        }
+    }
+    cout << "Користувач не знайдений." << endl;
+    return 0.0;
+}
+void addMoney(double addMoney)
+{
+    cash[identifikator] += addMoney;
+    cout << "Ваш баланс поповнено на " << addMoney << " грн" << endl;
+}
+
+void makeOrder()
+{
+    if (costOfMedicament.empty())
+    {
+        cout << "Немає доступних ліків для замовлення." << endl;
+        return;
+    }
+
+    cout << "Доступні ліки:" << endl;
+    for (size_t i = 0; i < costOfMedicament.size(); ++i)
+    {
+        cout << (i + 1) << " - " << costOfMedicament[i].name << " : " << costOfMedicament[i].cost << " грн" << endl;
+    }
+
+    Order order;
+    order.totalCost = 0.0;
+    order.status = PENDING;
+    order.id = currLogin + "_order_" + to_string(orderCounter++);
+    cout << "Створюється замовлення з id: " << order.id << endl;
+
+    while (true)
+    {
+        cout << "Введіть номер товару для додавання (0 - завершити): ";
+        int choice;
+        cin >> choice;
+        if (choice == 0) break;
+        if (choice < 1 || choice >(int)costOfMedicament.size())
+        {
+            cout << "Невірний номер товару." << endl;
+            continue;
+        }
+        int qty = 1;
+        cout << "Введіть кількість: ";
+        cin >> qty;
+
+        const medicament& m = costOfMedicament[choice - 1];
+        for (int q = 0; q < qty; ++q)
+        {
+            order.medicaments.push_back(m.name);
+        }
+        order.totalCost += m.cost * qty;
+        cout << "Додано " << qty << " x " << m.name << " до замовлення. Проміжний підсумок: " << order.totalCost << endl;
+    }
+
+    if (order.medicaments.empty())
+    {
+        cout << "У замовленні немає товарів. Скасування." << endl;
+        return;
+    }
+
+    cout << "Підсумок замовлення (" << order.id << "):" << endl;
+    unordered_map<string, int> counts; // medicine name -> quantity
+    for (const auto& it : order.medicaments)
+        counts[it]++;
+    for (const auto& kv : counts) // print medicine and quantity
+    {
+        cout << kv.first << " x " << kv.second << endl;
+    }
+    cout << "Загальна сума: " << order.totalCost << " грн" << endl;
+
+    cout << "Підтвердити та оплатити? (y/n): ";
+    char confirm;
+    cin >> confirm;
+    if (confirm == 'n')
+    {
+        cout << "Замовлення скасовано користувачем." << endl;
+        return;
+    }
+
+    // store order as pending
+    ordersDb[order.id] = order;
+
+    // Use order.id as payment id so refunds/cancellations target this order
+    Payment payment = processPayment(order.id, order.totalCost, cash[identifikator]);
+}
+
+int main()
+{
+    int autorization; // 1 or 2 for authentication
+    bool auth = true; // until user signs in
+    int action; // user's choice
+    bool running = true;
+    double sum; // amount to top up
+    SetConsoleOutputCP(1251);
+    SetConsoleCP(1251);
+
+    // Example medicaments so ordering can be tested
+    costOfMedicament.push_back({ "Аспірін", 25.0 });
+    costOfMedicament.push_back({ "Парацетомол1000", 30.0 });
+    costOfMedicament.push_back({ "Ібупрофен500", 40.0 });
+
+    cout << "Ласкаво просимо, будь ласка, авторизуйтесь" << endl;
+    cout << "1 - увійти в існуючий акаунт; 2 - створити акаунт" << endl;
+    while (auth)
+    {
+        cin >> autorization;
+        if (autorization == 1)
+        {
+            signIn();
+            auth = false;
+        }
+        else if (autorization == 2)
+        {
+            signUp();
+            cout << "Для продовження, увійдіть в акаунт, введіть 1" << endl;
+        }
+        else
+            cout << "Введіть 1 для входу або 2 для реєстрації!" << endl;
+    }
+    cout << "Ласкаво просимо до головного меню" << endl;
+    while (running)
+    {
+        string nameOfMed;
+        cout << "Оберіть дію:" << endl;
+        cout << "1 - знайти ліки" << endl;
+        cout << "2 - зробити замовлення / оплатити замовлення" << endl;
+        cout << "3 - перевірити баланс" << endl;
+        cout << "4 - скасувати замовлення / повернути кошти" << endl;
+        cout << "5 - поповнити баланс" << endl;
+        cout << "6 - вийти" << endl;
+        cin >> action;
+        switch (action)
+        {
+        case 1:
+            cout << "Введіть назву ліків для пошуку:" << endl;
+            cin >> nameOfMed;
+            searchMedicine(nameOfMed);
+            break;
+        case 2:
+            makeOrder();
+            break;
+        case 3:
+            cout << checkBalanse(currLogin) << endl;
+            break;
+        case 4:
+        {
+            cout << "Введіть id замовлення для скасування (наприклад user_order_1): ";
+            string orderId;
+            cin >> orderId;
+            auto it = ordersDb.find(orderId);
+            if (it == ordersDb.end())
+            {
+                cout << "Замовлення не знайдено." << endl;
+            }
+            else
+            {
+                double amt = it->second.totalCost;
+                if (refundPayment(orderId, amt))
+                {
+                    it->second.status = REFUNDED;
+                    cout << "Замовлення " << orderId << " було повернено." << endl;
+                }
+            }
+            break;
+        }
+        case 5:
+            cout << "Введіть суму, на яку хочете поповнити" << endl;
+            cin >> sum;
+            addMoney(sum);
+            break;
+        case 6:
+            running = false;
+            cout << "Роботу завершено, бажаємо вам здоров'я!" << endl;
+            break;
+        default:
+            cout << "Невідома команда!" << endl;
+            break;
+        }
+    }
+    return 0;
+}
